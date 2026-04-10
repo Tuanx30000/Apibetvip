@@ -72,7 +72,8 @@ async function syncGameData(type) {
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-        const rawList = await response.json();   // ← API trả về array trực tiếp
+        const data = await response.json();
+        const rawList = data.list || [];   // ← SỬA: Lấy từ .list
 
         if (!Array.isArray(rawList) || rawList.length === 0) {
             console.log(`[TUANX3000-V5] ${type} → Không có dữ liệu`);
@@ -82,17 +83,16 @@ async function syncGameData(type) {
         const state = APP_STATE[type];
 
         const newHistory = rawList.map(item => {
-            const sum = Number(item.DiceSum || 0);
+            let resRaw = String(item.resultTruyenThong || '').toUpperCase();
             let finalRes = 'Xỉu';
-            if (sum >= 11 && sum <= 17) {
+            if (resRaw === 'TAI' || resRaw === 'TÀI') {
                 finalRes = 'Tài';
-            } else if (sum >= 4 && sum <= 10) {
+            } else if (resRaw === 'XIU' || resRaw === 'XỈU') {
                 finalRes = 'Xỉu';
             }
-            // Nếu là bộ ba giống nhau (tùy game) vẫn để Xỉu/Tài theo sum, tool sẽ soi theo lịch sử
 
             return {
-                session: Number(item.SessionId || 0),
+                session: Number(item.id || 0),        // ← SỬA: dùng "id"
                 result: finalRes
             };
         }).filter(h => h.session > 0).reverse();   // cũ -> mới
