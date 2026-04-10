@@ -8,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // =========================================================================================
-// 1. CẤU HÌNH API (TUANX3000 - V5)
+// 1. CẤU HÌNH API
 // =========================================================================================
 const API_CONFIG = {
     NOHU: 'https://wtx.macminim6.online/v1/tx/lite-sessions?cp=R&cl=R&pf=web&at=1b976f07877db7991b1a94f8f1b44bb0',
@@ -21,44 +21,112 @@ let APP_STATE = {
 };
 
 // =========================================================================================
-// 2. THUẬT TOÁN SOI CẦU (Giữ nguyên V4)
+// 2. THUẬT TOÁN V6 - PHÁ CẦU HOÀN THIỆN (Xử lý tốt bệt ngắn & các kiểu cầu)
 // =========================================================================================
 class SmartPredictor {
     predict(history) {
-        if (!history || history.length === 0) {
+        if (!history || history.length < 6) {
             return { 
                 ketqua: Math.random() > 0.5 ? 'Tài' : 'Xỉu', 
-                confidence: '50%', 
-                logic: 'Đang đợi dữ liệu API...' 
+                confidence: '55%', 
+                logic: 'Đang đợi dữ liệu đủ để phân tích' 
             };
         }
 
         const results = history.map(h => h.result);
         const last = results[results.length - 1];
-        let chain = 0;
-        for (let i = results.length - 1; i >= 0; i--) {
+
+        // Tính độ dài bệt hiện tại
+        let chain = 1;
+        for (let i = results.length - 2; i >= 0; i--) {
             if (results[i] === last) chain++;
             else break;
         }
 
-        if (chain >= 6) {
-            return { ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', confidence: '85%', logic: 'Bẻ cầu (Hết biên)' };
-        }
-        if (chain >= 2) {
-            return { ketqua: last, confidence: '75%', logic: `Bám bệt (${chain} tay)` };
-        }
-        if (results.length >= 2 && results[results.length - 1] !== results[results.length - 2]) {
-            return { ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', confidence: '80%', logic: 'Bám cầu 1-1' };
+        // Kiểm tra cầu 1-1 (Zigzag)
+        let isZigzag = true;
+        for (let i = 1; i < Math.min(7, results.length); i++) {
+            if (results[i] === results[i - 1]) {
+                isZigzag = false;
+                break;
+            }
         }
 
-        return { ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', confidence: '60%', logic: 'Cầu đảo' };
+        // Kiểm tra cầu nhịp 2-2 hoặc 3-3
+        let isDouble = true;
+        for (let i = 2; i < Math.min(8, results.length); i += 2) {
+            if (results[i] !== results[i - 2]) {
+                isDouble = false;
+                break;
+            }
+        }
+
+        // === LOGIC PHÁ CẦU & BÁM CẦU HOÀN THIỆN ===
+        if (chain >= 7) {
+            return { 
+                ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
+                confidence: '92%', 
+                logic: `PHÁ CẦU CỰC MẠNH (bệt ${chain} tay - hết biên)` 
+            };
+        }
+
+        if (chain >= 5) {
+            return { 
+                ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
+                confidence: '87%', 
+                logic: `Bẻ cầu dài (${chain} tay)` 
+            };
+        }
+
+        if (chain === 4) {
+            // Bệt 4 tay → rủi ro gãy cao → giảm tin cậy + cảnh báo
+            return { 
+                ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
+                confidence: '68%', 
+                logic: `Bệt 4 tay - Cẩn thận gãy cầu` 
+            };
+        }
+
+        if (chain === 3) {
+            // Bệt 3 tay → không bám mạnh, ưu tiên quan sát
+            return { 
+                ketqua: last, 
+                confidence: '69%', 
+                logic: `Bám bệt ngắn (3 tay)` 
+            };
+        }
+
+        // Ưu tiên cao với cầu 1-1
+        if (isZigzag && results.length >= 5) {
+            return { 
+                ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
+                confidence: '83%', 
+                logic: 'Bám cầu 1-1 (Zigzag mạnh)' 
+            };
+        }
+
+        // Cầu nhịp 2-2 hoặc 3-3
+        if (isDouble && results.length >= 6) {
+            return { 
+                ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
+                confidence: '76%', 
+                logic: 'Cầu nhịp đôi - Đảo nhịp' 
+            };
+        }
+
+        // Mặc định đảo cầu (an toàn nhất khi không rõ nhịp)
+        return { 
+            ketqua: last === 'Tài' ? 'Xỉu' : 'Tài', 
+            confidence: '64%', 
+            logic: 'Cầu đảo thông thường' 
+        };
     }
 }
 
 const predictor = new SmartPredictor();
 
 // =========================================================================================
-// 3. ĐỒNG BỘ DỮ LIỆU (SỬA ĐỂ KHỚP API MỚI - V5)
+// 3. ĐỒNG BỘ DỮ LIỆU (Giữ nguyên ổn định)
 // =========================================================================================
 async function syncGameData(type) {
     try {
@@ -73,29 +141,26 @@ async function syncGameData(type) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
-        const rawList = data.list || [];   // ← SỬA: Lấy từ .list
+        const rawList = data.list || [];
 
         if (!Array.isArray(rawList) || rawList.length === 0) {
-            console.log(`[TUANX3000-V5] ${type} → Không có dữ liệu`);
+            console.log(`[TUANX3000-V6] ${type} → Không có dữ liệu mới`);
             return;
         }
 
         const state = APP_STATE[type];
 
         const newHistory = rawList.map(item => {
-            let resRaw = String(item.resultTruyenThong || '').toUpperCase();
+            let resRaw = String(item.resultTruyenThong || '').toUpperCase().trim();
             let finalRes = 'Xỉu';
-            if (resRaw === 'TAI' || resRaw === 'TÀI') {
-                finalRes = 'Tài';
-            } else if (resRaw === 'XIU' || resRaw === 'XỈU') {
-                finalRes = 'Xỉu';
-            }
+            if (resRaw === 'TAI' || resRaw === 'TÀI') finalRes = 'Tài';
+            else if (resRaw === 'XIU' || resRaw === 'XỈU') finalRes = 'Xỉu';
 
             return {
-                session: Number(item.id || 0),        // ← SỬA: dùng "id"
+                session: Number(item.id || 0),
                 result: finalRes
             };
-        }).filter(h => h.session > 0).reverse();   // cũ -> mới
+        }).filter(h => h.session > 0).reverse();
 
         if (newHistory.length === 0) return;
 
@@ -107,14 +172,14 @@ async function syncGameData(type) {
             if (state.lastPred.ketqua === latest.result) state.stats.win++;
             else state.stats.loss++;
             state.processed.add(latest.session);
-            if (state.processed.size > 100) state.processed.delete([...state.processed][0]);
+            if (state.processed.size > 120) state.processed.delete([...state.processed][0]);
         }
 
         state.history = newHistory;
-        console.log(`[TUANX3000-V5] ${type} → Đồng bộ thành công ${newHistory.length} phiên`);
+        console.log(`[TUANX3000-V6] ${type} → Đồng bộ thành công ${newHistory.length} phiên`);
 
     } catch (e) {
-        console.log(`[TUANX3000-V5-ERROR] ${type}:`, e.message);
+        console.log(`[TUANX3000-V6-ERROR] ${type}:`, e.message);
     }
 }
 
@@ -136,7 +201,12 @@ app.get('/', (req, res) => {
 
             if (!s.lastPred || s.lastPred.phien !== nextId) {
                 const p = predictor.predict(s.history);
-                s.lastPred = { phien: nextId, ketqua: p.ketqua, confidence: p.confidence, logic: p.logic };
+                s.lastPred = { 
+                    phien: nextId, 
+                    ketqua: p.ketqua, 
+                    confidence: p.confidence, 
+                    logic: p.logic 
+                };
             }
 
             return {
@@ -154,14 +224,14 @@ app.get('/', (req, res) => {
         };
 
         res.json({
-            system: "TX-PREDICTOR-V5-FINAL",
+            system: "TX-PREDICTOR-V6-FINAL",
             admin: "TUANX3000",
             update_at: new Date().toLocaleString('vi-VN'),
             nohu: build('nohu'),
             md5: build('md5')
         });
     } catch (err) {
-        console.error('[TUANX3000-V5] Error:', err);
+        console.error('[TUANX3000-V6] Error:', err);
         res.status(500).json({ error: "Server error" });
     }
 });
@@ -171,11 +241,11 @@ app.get('/reset', (req, res) => {
         APP_STATE[k].stats = { win: 0, loss: 0, total: 0 };
         APP_STATE[k].processed.clear();
     });
-    res.json({ message: "Đã reset thống kê - V5" });
+    res.json({ message: "Đã reset thống kê - V6 Phá cầu hoàn thiện" });
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 TUANX3000: TX-PREDICTOR-V5 ONLINE PORT ${PORT}`);
+    console.log(`🚀 TUANX3000: TX-PREDICTOR-V6-FINAL (Phá cầu hoàn thiện) ONLINE PORT ${PORT}`);
     syncGameData('nohu');
     syncGameData('md5');
 });
